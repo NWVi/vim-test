@@ -6,67 +6,47 @@ function! test#csharp#xunit#test_file(file) abort
   if fnamemodify(a:file, ':t') =~# g:test#csharp#xunit#file_pattern
     if exists('g:test#csharp#runner')
       return g:test#csharp#runner ==# 'xunit'
-    else
-      return s:is_using_dotnet_xunit_cli(a:file)
-          \ && (search('using Xunit', 'n') > 0)
-          \ && (search('[(Fact|Theory).*]', 'n') > 0)
     endif
+    return 1
   endif
 endfunction
 
 function! test#csharp#xunit#build_position(type, position) abort
-  let l:found_nearest = 0
+  let file = a:position['file']
+  let filename = fnamemodify(file, ':t:r')
+  let project_path = test#csharp#get_project_path(file)
+  let name = test#base#nearest_test(a:position, g:test#csharp#patterns, { 'namespaces_with_same_indent': 1 })
+  let namespace = join(name['namespace'], '.')
+  let test_name = join(name['test'], '.')
+  let nearest_test = join([namespace, test_name], '.')
+
   if a:type ==# 'nearest'
-    let l:found_nearest = 1
-    let l:n = test#base#nearest_test(a:position, g:test#csharp#patterns)
-    let l:fully_qualified_name = join(l:n['namespace'] + l:n['test'], '.')
-    if !empty(l:fully_qualified_name)
-      return [s:test_command(l:n), l:fully_qualified_name]
-    endif
-  endif
-  if a:type ==# 'file' || l:found_nearest
-    let l:position = a:position
-    let l:position['line'] = '$'
-    let l:n = test#base#nearest_test(l:position, g:test#csharp#patterns)
-
-    " Discard the test name and use the name space with the test class name
-    let l:n['test'] = []
-    let l:fully_qualified_name = join(l:n['namespace'][:1], '.')
-
-    if !empty(l:fully_qualified_name)
-      return [s:test_command(l:n), l:fully_qualified_name]
+    if !empty(test_name)
+      return [project_path, '--filter', 'FullyQualifiedName=' . nearest_test]
     else
-      throw 'Could not find any tests.'
+      if !empty(namespace)
+        return [project_path, '--filter', 'FullyQualifiedName~' . namespace]
+      else
+        return [project_path]
+      endif
+    endif
+  elseif a:type ==# 'file'
+    throw 'file tests is not supported for dotnettest'
+  elseif a:type ==# 'suite'
+    if !empty(project_path)
+      return [project_path]
+    else
+      return []
     endif
   endif
-
-  return []
 endfunction
 
 function! test#csharp#xunit#build_args(args) abort
   let l:args = a:args
-  call insert(l:args, '-nologo')
+  call insert(l:args, '--nologo --verbosity q')
   return [join(l:args, ' ')]
 endfunction
 
 function! test#csharp#xunit#executable() abort
-  return 'dotnet xunit'
-endfunction
-
-function! s:test_command(name) abort
-  if !empty(a:name['test'])
-    return '-method'
-  elseif len(a:name['namespace']) > 1
-    return '-class'
-  else
-    return '-namespace'
-  endif
-endfunction
-
-function! s:is_using_dotnet_xunit_cli(file) abort
-  let l:project_path = test#csharp#get_project_path(a:file)
-  return filereadable(l:project_path) 
-      \ && match(
-          \ readfile(l:project_path), 
-          \ 'DotNetCliToolReference.*dotnet-xunit')
+  return 'dotnet test'
 endfunction
